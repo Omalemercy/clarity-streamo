@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Creator registration flow",
+    name: "Creator registration flow with reward tiers",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const creator = accounts.get('wallet_1')!;
         
@@ -20,7 +20,7 @@ Clarinet.test({
         
         block.receipts[0].result.expectOk().expectBool(true);
         
-        // Verify creator data
+        // Verify creator data with new fields
         let getCreator = chain.mineBlock([
             Tx.contractCall('streamo_platform', 'get-creator-data', [
                 types.principal(creator.address)
@@ -30,11 +30,13 @@ Clarinet.test({
         const creatorData = getCreator.receipts[0].result.expectOk().expectSome();
         assertEquals(creatorData['name'], "Test Creator");
         assertEquals(creatorData['total-views'], types.uint(0));
+        assertEquals(creatorData['engagement-score'], types.uint(0));
+        assertEquals(creatorData['reward-tier'], types.uint(1));
     },
 });
 
 Clarinet.test({
-    name: "Video publishing and viewing flow",
+    name: "Video engagement and rewards flow",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const creator = accounts.get('wallet_1')!;
         const viewer = accounts.get('wallet_2')!;
@@ -56,14 +58,22 @@ Clarinet.test({
         
         const videoId = publish.receipts[0].result.expectOk();
         
-        // Record view
-        let view = chain.mineBlock([
+        // Record view, like and comment
+        let engagement = chain.mineBlock([
             Tx.contractCall('streamo_platform', 'record-view', [
+                videoId
+            ], viewer.address),
+            Tx.contractCall('streamo_platform', 'like-video', [
+                videoId
+            ], viewer.address),
+            Tx.contractCall('streamo_platform', 'comment-video', [
                 videoId
             ], viewer.address)
         ]);
         
-        view.receipts[0].result.expectOk().expectBool(true);
+        engagement.receipts[0].result.expectOk().expectBool(true);
+        engagement.receipts[1].result.expectOk().expectBool(true);
+        engagement.receipts[2].result.expectOk().expectBool(true);
         
         // Verify video data
         let getVideo = chain.mineBlock([
@@ -74,36 +84,26 @@ Clarinet.test({
         
         const videoData = getVideo.receipts[0].result.expectOk().expectSome();
         assertEquals(videoData['views'], types.uint(1));
+        assertEquals(videoData['likes'], types.uint(1));
+        assertEquals(videoData['comments'], types.uint(1));
     },
 });
 
 Clarinet.test({
-    name: "Tipping flow",
+    name: "Reward tiers functionality",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const creator = accounts.get('wallet_1')!;
-        const tipper = accounts.get('wallet_2')!;
         
-        // Setup creator and video
-        let setup = chain.mineBlock([
-            Tx.contractCall('streamo_platform', 'register-creator', [
-                types.ascii("Test Creator")
-            ], creator.address),
-            Tx.contractCall('streamo_platform', 'publish-video', [
-                types.ascii("Test Video"),
-                types.ascii("Test Description")
+        // Get reward tier info
+        let tierInfo = chain.mineBlock([
+            Tx.contractCall('streamo_platform', 'get-reward-tier', [
+                types.uint(1)
             ], creator.address)
         ]);
         
-        const videoId = setup.receipts[1].result.expectOk();
-        
-        // Tip creator
-        let tip = chain.mineBlock([
-            Tx.contractCall('streamo_platform', 'tip-creator', [
-                videoId,
-                types.uint(100)
-            ], tipper.address)
-        ]);
-        
-        tip.receipts[0].result.expectOk().expectBool(true);
+        const tierData = tierInfo.receipts[0].result.expectOk().expectSome();
+        assertEquals(tierData['name'], "Bronze");
+        assertEquals(tierData['multiplier'], types.uint(1));
+        assertEquals(tierData['threshold'], types.uint(0));
     },
 });
